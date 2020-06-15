@@ -5,6 +5,7 @@ from utils.global_variables import (task_1_texts_with_label_collisions,
                                     task_2_texts_with_fact_collisions)
 import nltk
 from collections import defaultdict
+from sklearn.model_selection import train_test_split
 
 
 def csv_reader(
@@ -22,8 +23,8 @@ def csv_reader(
             "Offset_Sentence3": float, "Cause_Start": int,
             "Cause_End": int, "Effect_Start": int, "Effect_End": int,
             "Sentence": str
-        }
-    )
+            }
+        )
     result.columns = [column.lower() for column in result.columns]
     result = result.rename(mapper={"index": index_name}, axis=1)
     result = result[~result.text.isna()]
@@ -53,16 +54,16 @@ def merge_tasks(
             new_df["effects"].append([])
         else:
             new_df["gold"].append("1")
-            causes = set(zip(cur_df.cause_start, cur_df.cause_end))
-            effects = set(zip(cur_df.effect_start, cur_df.effect_end))
+            causes = set(cur_df.cause)
+            effects = set(cur_df.effect)
 
             if not (len(causes) == 1 or len(effects) == 1):
                 new_df["causes"].append(
-                    [(cur_df.cause_start.values[0], cur_df.cause_end.values[0])]
-                )
+                    [cur_df.cause.values[0]]
+                    )
                 new_df["effects"].append(
-                    [(cur_df.effect_start.values[0], cur_df.effect_end.values[0])]
-                )
+                    [cur_df.effect.values[0]]
+                    )
             else:
                 new_df["causes"].append(list(causes))
                 new_df["effects"].append(list(effects))
@@ -104,10 +105,116 @@ def concat_dataset_parts(
     return data
 
 
-def tokenize_dataset(
-        dataset: pd.DataFrame
+def create_merged_train_examples(
+        paths_to_task_1: List[str],
+        paths_to_task_2: List[str],
+        sep: str = "; ",
+        tag_format: str = "bio"
     ):
-    df = dataset.copy()
-    df.loc[:, 'tokenized_text'] = df.text.apply(nltk.word_tokenize)
+    merged_df = merge_tasks(paths_to_task_1, paths_to_task_2, sep)
+    examples = []
+    not_found_causes_num = 0
+    not_found_effects_num = 0
 
-    return df
+    for row in merged_df.itertuples():
+        cause_not_found = True
+        effect_not_found = True
+
+        tokens = nltk.word_tokenize(row.text)
+        causes = [nltk.word_tokenize(cause) for cause in row.causes]
+        effects = [nltk.word_tokenize(effect) for effect in row.effects]
+        labels = ['0'] * len(tokens)
+
+        for cause in causes:
+            cause_positions = get_sublist_positions(tokens, cause)
+            if len(cause_positions) > 0:
+                cause_not_found = False
+                filling_values = get_formatted_labels("C", len(cause), tag_format)
+                for i, lab_pos in enumerate(cause_positions):
+                    labels[lab_pos] = filling_values[i]
+            else:
+                print(tokens, cause)
+
+        for effect in effects:
+            effect_positions = get_sublist_positions(tokens, effect)
+            if len(effect_positions) > 0:
+                effect_not_found = False
+                filling_values = get_formatted_labels("E", len(effect), tag_format)
+                for i, lab_pos in enumerate(effect_positions):
+                    labels[lab_pos] = filling_values[i]
+
+        not_found_causes_num += 1 if cause_not_found and len(causes) else 0
+        not_found_effects_num += 1 if effect_not_found and len(effects) else 0
+
+        if (cause_not_found or effect_not_found) and row.gold != "0":
+            continue
+
+        example = {
+            "idx": row.idx,
+            "text": row.text,
+            "tokens": tokens,
+            "text_label": row.gold,
+            "sequence_labels": labels
+        }
+        examples.append(example)
+
+    print(f"not found causes: {not_found_causes_num}")
+    print(f"not found effects: {not_found_effects_num}")
+    print(f"total number of examples: {len(merged_df)}")
+
+    return examples
+
+
+def get_formatted_labels(
+        label: str,
+        labels_len: int,
+        tag_format: str = "bio"
+    ):
+    if tag_format == "bio":
+        labels = [f"I-{label}"] * labels_len
+        labels[0] = f"B-{label}"
+
+    elif tag_format == "se":
+        labels = ["0"] * labels_len
+        labels[0] = f"S-{label}"
+        labels[-1] = f"E-{label}"
+
+    elif tag_format == "bieo":
+        labels = [f"I-{label}"] * labels_len
+        labels[-1] = f"E-{label}"
+        labels[0] = f"B-{label}"
+
+    return labels
+
+
+def get_sublist_positions(
+        whole_list: list,
+        sublist: list
+    ):
+    result = []
+    for i in range(len(whole_list) - len(sublist) + 1):
+        if sublist == whole_list[i: i + len(sublist)]:
+            result = list(range(i, len(sublist) + i))
+    return result
+
+
+def get_train_and_validation_examples(
+        paths_to_task_1: List[str],
+        paths_to_task_2: List[str],
+        sep: str = "; ",
+        tag_format: str = "bio",
+        validation_ratio: int = 0.25
+    ):
+    examples = create_merged_train_examples(
+        paths_to_task_1,
+        paths_to_task_2,
+        sep,
+        tag_format
+    )
+
+    train, validation = train_test_split(
+        examples, test_size=validation_ratio,
+        random_state=2020,
+        stratify=[ex["text_label"] for ex in examples]
+    )
+    return train, validation
