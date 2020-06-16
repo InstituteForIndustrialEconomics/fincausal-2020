@@ -32,7 +32,9 @@ logger = logging.getLogger(__name__)
 
 
 def compute_prec_rec_f1(text_preds, text_labels, sequence_preds, sequence_labels, label2id):
-    eval_seqience_labs = list(label2id['sequence'].values())
+    eval_seqience_labs = [
+        label2id['sequence'][x] for x in label2id['sequence'] if x != '0'
+    ]
     text_p, text_r, text_f1, _ = precision_recall_fscore_support(
         text_labels, text_preds,
         labels=[0, 1], average='weighted'
