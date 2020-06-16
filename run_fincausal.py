@@ -10,17 +10,19 @@ import numpy as np
 import pandas as pd
 import torch
 from scipy.special import softmax
-from torch.utils.data import DataLoader, TensorDataset
-from collections import Counter
 
 from torch.nn import CrossEntropyLoss
-
+from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 from transformers.file_utils import PYTORCH_PRETRAINED_BERT_CACHE, WEIGHTS_NAME, CONFIG_NAME
-from models.multitask_bert import BertForMultitaskLearning
 from tqdm import tqdm
-from models.examples_to_features import examples_to_features_converters, InputExample, create_examples
+from models.examples_to_features import (
+    examples_to_features_converters, InputExample,
+    create_examples, get_dataloader_and_text_ids_with_sequence_ids,
+    models, tokenizers, DataProcessor
+)
 from collections import defaultdict
-from sklearn import precision_recall_fscore_support
+from sklearn.metrics import precision_recall_fscore_support
+from torch.nn import CrossEntropyLoss
 
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
@@ -29,90 +31,33 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s
 logger = logging.getLogger(__name__)
 
 
-class DataProcessor(object):
-    """Processor for the FINCAUSAL data set."""
-
-    def __init__(self, tag_format: str = "bio"):
-        self.tag_format = tag_format
-
-    @classmethod
-    def _read_json(cls, input_file):
-        with open(input_file, "r", encoding='utf-8') as reader:
-            data = json.load(reader)
-        return data
-
-    def get_train_examples(self, data_dir):
-        """See base class."""
-        return create_examples(
-            self._read_json(
-                os.path.join(data_dir, f"{self.tag_format}_train.json")
-            ),
-            "train"
-        )
-
-    def get_dev_examples(self, data_dir):
-        """See base class."""
-        return create_examples(
-            self._read_json(
-                os.path.join(data_dir, f"P{self.tag_format}_valid.json")
-            ),
-            "dev"
-        )
-
-    def get_test_examples(self, test_file):
-        """See base class."""
-        return create_examples(
-            self._read_json(test_file), "test")
-
-    def get_text_labels(self, data_dir):
-        """See base class."""
-        dataset = self._read_json(os.path.join(data_dir, "train.json"))
-        counter = Counter()
-        labels = []
-        for example in dataset:
-            counter[example['text_label']] += 1
-        logger.info(f"text_label: {len(counter)} labels")
-        for label, counter in counter.most_common():
-            logger.info("%s: %.2f%%" % (label, counter * 100.0 / len(dataset)))
-            if label not in labels:
-                labels.append(label)
-        return labels
-
-    def get_sequence_labels(self, data_dir):
-        """See base class."""
-        dataset = self._read_json(os.path.join(data_dir, "train.json"))
-        denominator = len([lab for example in dataset for lab in example['sequence_labels']])
-        counter = Counter()
-        labels = []
-        for example in dataset:
-            for lab in example['sequence_labels']:
-                counter[lab] += 1
-        logger.info(f"sequence_labels: {len(counter)} labels")
-        for label, counter in counter.most_common():
-            logger.info("%s: %.2f%%" % (label, counter * 100.0 / denominator))
-            if label not in labels:
-                labels.append(label)
-        return labels
-
-
-def compute_f1(text_preds, text_labels, sequence_preds, sequence_labels, label2id):
-    eval_seqience_labs = label2id['sequence'].values()
+def compute_prec_rec_f1(text_preds, text_labels, sequence_preds, sequence_labels, label2id):
+    eval_seqience_labs = list(label2id['sequence'].values())
+    text_p, text_r, text_f1, _ = precision_recall_fscore_support(
+        text_labels, text_preds,
+        labels=[0, 1], average='weighted'
+    )
+    seq_p, seq_r, seq_f1, _ = precision_recall_fscore_support(
+        sequence_labels, sequence_preds,
+        labels=eval_seqience_labs, average="weighted"
+    )
     result = {
-        'text_f1': precision_recall_fscore_support(
-            text_labels, text_preds,
-            labels=[0, 1], average='weighted'
-        )[2],
-        'sequence_f1': precision_recall_fscore_support(
-            sequence_labels, sequence_preds,
-            labels=eval_seqience_labs, average="weighted"
-        )[2],
+        'text_f1': text_f1,
+        'text_p': text_p,
+        'text_r': text_r,
+        'sequence_f1': seq_f1,
+        'sequence_p': seq_p,
+        'sequence_r': seq_r
     }
     return result
 
 
-def evaluate(model, device, eval_dataloader, eval_text_labels_ids,
-             eval_sequence_labels_ids, num_text_labels,
-             num_sequence_labels, label2id, compute_scores=True, verbose=True):
+def evaluate(
+        model, device, eval_dataloader, eval_text_labels_ids,
+        eval_sequence_labels_ids, num_text_labels,
+        num_sequence_labels, label2id,
+        compute_scores=True, verbose=True
+    ):
     model.eval()
     text_clf_weight = model.text_clf_weight
     sequence_clf_weight = model.sequence_clf_weight
@@ -121,23 +66,22 @@ def evaluate(model, device, eval_dataloader, eval_text_labels_ids,
     nb_eval_steps = 0
     preds = defaultdict(list)
 
-    for input_ids, input_mask, segment_ids, \
-        text_labels_ids, sequence_labels_ids \
-        in tqdm(eval_dataloader, total=len(eval_dataloader),
-                desc='validating...'
-            ):
-        input_ids = input_ids.to(device)
-        input_mask = input_mask.to(device)
-        segment_ids = segment_ids.to(device)
-        text_labels_ids = text_labels_ids.to(device)
-        sequence_labels_ids = sequence_labels_ids.to(device)
+    for batch in tqdm(
+            eval_dataloader, total=len(eval_dataloader),
+            desc='validating...'
+        ):
+        batch = tuple([elem.to(device) for elem in batch])
+        input_ids, input_mask, segment_ids, \
+            text_labels_ids, sequence_labels_ids = batch
 
         with torch.no_grad():
-            output = model(input_ids=input_ids,
-                           token_type_ids=segment_ids,
-                           attention_mask=input_mask,
-                           sent_type_labels=None,
-                           tag_labels=None, relation_labels=None)
+            output = model(
+                input_ids=input_ids,
+                token_type_ids=segment_ids,
+                attention_mask=input_mask,
+                text_labels=None,
+                sequence_labels=None
+            )
 
         sequence_logits, text_logits = output[:2]
         loss_fct = CrossEntropyLoss()
@@ -147,8 +91,8 @@ def evaluate(model, device, eval_dataloader, eval_text_labels_ids,
         )
         eval_loss['text'] += tmp_text_eval_loss.mean().item()
 
+        loss_fct = CrossEntropyLoss(ignore_index=0)
         active_loss = input_mask.view(-1) == 1
-
         active_labels = sequence_labels_ids.view(-1)[active_loss]
         active_logits = sequence_logits.view(-1, num_sequence_labels)[active_loss]
         tmp_sequence_eval_loss = loss_fct(active_logits, active_labels)
@@ -158,25 +102,22 @@ def evaluate(model, device, eval_dataloader, eval_text_labels_ids,
             text_clf_weight * eval_loss['text'] + sequence_clf_weight * eval_loss['sequence']
 
         nb_eval_steps += 1
-        if len(preds['text']) == 0:
-            preds['text'].append(text_logits.detach().cpu().numpy())
-            preds['sequence'].append(sequence_logits.detach().cpu().numpy())
-        else:
-            preds['text'][0] = np.append(
-                preds['text'][0], text_logits.detach().cpu().numpy(), axis=0)
-            preds['sequence'][0] = np.append(
-                preds['sequence'][0], sequence_logits.detach().cpu().numpy(), axis=0)
+        preds['text'].append(text_logits.detach().cpu().numpy())
+        preds['sequence'].append(sequence_logits.detach().cpu().numpy())
+
+    preds['text'] = np.concatenate(preds['text'], axis=0)
+    preds['sequence'] = np.concatenate(preds['sequence'], axis=0)
 
     scores = {}
     for key in eval_loss:
         eval_loss[key] = eval_loss[key] / nb_eval_steps
 
     for key in preds:
-        scores[key] = np.max(softmax(preds[key][0], axis=-1), axis=-1)
-        preds[key] = np.argmax(preds[key][0], axis=-1)
+        scores[key] = softmax(preds[key], axis=-1).max(axis=-1)
+        preds[key] = preds[key].argmax(axis=-1)
 
     if compute_scores:
-        result = compute_f1(
+        result = compute_prec_rec_f1(
             preds['text'], eval_text_labels_ids.numpy(),
             np.array([x for y in preds['sequence'] for x in y]),
             np.array([x for y in eval_sequence_labels_ids.numpy() for x in y]),
@@ -232,60 +173,48 @@ def main(args):
     logger.info(args)
     logger.info("device: {}, n_gpu: {}".format(device, n_gpu))
 
-    processor = DataProcessor()
-    text_labels_list = processor.get_text_labels(args.data_dir)
-    sequence_labels_list = processor.get_sequence_labels(args.data_dir)
+    processor = DataProcessor(tag_format=args.tag_format)
+    text_labels_list = processor.get_text_labels(args.data_dir, logger)
+    sequence_labels_list = processor.get_sequence_labels(args.data_dir, logger)
 
     label2id = {
         'text': {
             label: i for i, label in enumerate(text_labels_list)
         },
         'sequence': {
-            label: i for i, label in enumerate(sequence_labels_list)
+            label: i for i, label in enumerate(sequence_labels_list, 1)
         }
      }
 
     id2label = {
-        'sent_type': {
+        'text': {
             i: label for i, label in enumerate(text_labels_list)
         },
         'sequence': {
-            i: label for i, label in enumerate(sequence_labels_list)
+            i: label for i, label in enumerate(sequence_labels_list, 1)
         }
     }
 
     num_text_labels = len(text_labels_list)
-    num_sequence_labels = len(sequence_labels_list)
+    num_sequence_labels = len(sequence_labels_list) + 1
 
     do_lower_case = 'uncased' in args.model
     tokenizer = tokenizers[args.model].from_pretrained(args.model, do_lower_case=do_lower_case)
     convert_examples_to_features = examples_to_features_converters[args.model]
 
     eval_examples = processor.get_dev_examples(args.data_dir)
-    eval_features, _ = convert_examples_to_features(
+    eval_features = convert_examples_to_features(
         eval_examples, label2id, args.max_seq_length, tokenizer, logger
     )
     logger.info("***** Dev *****")
     logger.info("  Num examples = %d", len(eval_examples))
     logger.info("  Batch size = %d", args.eval_batch_size)
-    all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
-    all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
-    all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
-    all_text_labels_ids = torch.tensor([f.text_id for f in eval_features], dtype=torch.long)
-    all_sequence_labels_ids = torch.tensor([f.sequence_ids for f in eval_features], dtype=torch.long)
-
-    eval_data = TensorDataset(
-        all_input_ids, all_input_mask, all_segment_ids,
-        all_text_labels_ids, all_sequence_labels_ids
-    )
-
-    eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
-    eval_text_labels_ids = all_text_labels_ids
-    eval_sequence_labels_ids = all_sequence_labels_ids
+    eval_dataloader, eval_text_labels_ids, eval_sequence_labels_ids = \
+        get_dataloader_and_text_ids_with_sequence_ids(eval_features, args.eval_batch_size)
 
     if args.do_train:
         train_examples = processor.get_train_examples(args.data_dir)
-        train_features, _ = convert_examples_to_features(
+        train_features = convert_examples_to_features(
             train_examples, label2id,
             args.max_seq_length, tokenizer, logger
         )
@@ -295,17 +224,8 @@ def main(args):
         else:
             random.shuffle(train_features)
 
-        all_input_ids = torch.tensor([f.input_ids for f in train_features], dtype=torch.long)
-        all_input_mask = torch.tensor([f.input_mask for f in train_features], dtype=torch.long)
-        all_segment_ids = torch.tensor([f.segment_ids for f in train_features], dtype=torch.long)
-        all_text_labels_ids = torch.tensor([f.text_id for f in train_features], dtype=torch.long)
-        all_sequence_labels_ids = torch.tensor([f.sequence_ids for f in train_features], dtype=torch.long)
-
-        train_data = TensorDataset(
-            all_input_ids, all_input_mask, all_segment_ids,
-            all_text_labels_ids, all_sequence_labels_ids
-        )
-        train_dataloader = DataLoader(train_data, batch_size=args.train_batch_size)
+        train_dataloader, _, _ = \
+            get_dataloader_and_text_ids_with_sequence_ids(train_features, args.train_batch_size)
         train_batches = [batch for batch in train_dataloader]
 
         num_train_optimization_steps = \
@@ -322,12 +242,12 @@ def main(args):
         lrs = [args.learning_rate] if args.learning_rate else \
             [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
         for lr in lrs:
-            model = BertForMultitaskLearning.from_pretrained(
+            model = models[args.model].from_pretrained(
                 args.model, cache_dir=str(PYTORCH_PRETRAINED_BERT_CACHE),
                 num_text_labels=num_text_labels,
                 num_sequence_labels=num_sequence_labels,
                 sequence_clf_weight=args.sequence_clf_weight,
-                text_clf_weight=args.relation_weight
+                text_clf_weight=args.text_clf_weight
             )
             model.to(device)
 
@@ -357,10 +277,10 @@ def main(args):
                 optimizer_grouped_parameters,
                 lr=lr
             )
-            scheduler = WarmupLinearSchedule(
+            scheduler = get_linear_schedule_with_warmup(
                 optimizer,
-                warmup_steps=warmup_steps,
-                t_total=num_train_optimization_steps
+                num_warmup_steps=warmup_steps,
+                num_training_steps=num_train_optimization_steps
             )
 
             start_time = time.time()
@@ -450,27 +370,17 @@ def main(args):
         test_file = os.path.join(args.data_dir, 'test.json') if args.test_file == '' else args.test_file
         eval_examples = processor.get_test_examples(test_file)
 
-        eval_features, eval_examples = convert_examples_to_features(
+        eval_features = convert_examples_to_features(
             eval_examples, label2id, args.max_seq_length, tokenizer, logger
         )
         logger.info("***** Test *****")
         logger.info("  Num examples = %d", len(eval_examples))
         logger.info("  Batch size = %d", args.eval_batch_size)
 
-        all_input_ids = torch.tensor([f.input_ids for f in eval_features], dtype=torch.long)
-        all_input_mask = torch.tensor([f.input_mask for f in eval_features], dtype=torch.long)
-        all_segment_ids = torch.tensor([f.segment_ids for f in eval_features], dtype=torch.long)
-        all_text_labels_ids = torch.tensor([f.text_id for f in eval_features], dtype=torch.long)
-        all_sequence_labels_ids = torch.tensor([f.sequence_ids for f in eval_features], dtype=torch.long)
-        eval_orig_positions_map = [f.orig_positions_map for f in eval_features]
+        eval_dataloader, eval_text_labels_ids, eval_sequence_labels_ids = \
+            get_dataloader_and_text_ids_with_sequence_ids(eval_features, args.eval_batch_size)
 
-        eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,
-                                  all_text_labels_ids, all_sequence_labels_ids)
-        eval_dataloader = DataLoader(eval_data, batch_size=args.eval_batch_size)
-        eval_text_labels_ids = all_text_labels_ids
-        eval_sequence_labels_ids = all_sequence_labels_ids
-
-        model = BertForMultitaskLearning.from_pretrained(
+        model = models[args.model].from_pretrained(
             args.output_dir, num_sequence_labels=num_sequence_labels,
             num_relation_labels=num_relation_labels,
             text_clf_weight=args.text_clf_weight,
@@ -478,10 +388,12 @@ def main(args):
         )
         model.to(device)
 
-        preds, result, scores = evaluate(model, device, eval_dataloader, eval_text_labels_ids,
-                                         eval_sequence_labels_ids,
-                                         num_text_labels, num_sequence_labels, label2id,
-                                         compute_scores=False)
+        preds, result, scores = evaluate(
+            model, device, eval_dataloader, eval_text_labels_ids,
+            eval_sequence_labels_ids,
+            num_text_labels, num_sequence_labels, label2id,
+            compute_scores=False
+        )
 
         aggregated_results = {}
         task = "sequence"
@@ -543,6 +455,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--test_file", default='', type=str, required=False)
+    parser.add_argument("--tag_format", default='bieo', type=str, required=False)
     parser.add_argument("--model", default=None, type=str, required=True)
     parser.add_argument("--data_dir", default=None, type=str, required=True,
                         help="The input data dir. Should contain the .json files for the task.")
@@ -577,10 +490,10 @@ if __name__ == "__main__":
     parser.add_argument("--max_grad_norm", default=1.0, type=float,
                         help="maximal gradient norm")
 
-    parser.add_argument("--text_weight", default=1.0, type=float,
+    parser.add_argument("--text_clf_weight", default=1.0, type=float,
                         help="Proportion of training to perform linear learning rate warmup for. "
                              "E.g., 0.1 = 10%% of training.")
-    parser.add_argument("--sequence_weight", default=1.0, type=float,
+    parser.add_argument("--sequence_clf_weight", default=1.0, type=float,
                         help="Proportion of training to perform linear learning rate warmup for. "
                              "E.g., 0.1 = 10%% of training.")
 
@@ -590,7 +503,7 @@ if __name__ == "__main__":
                         help="Whether not to use CUDA when available")
     parser.add_argument('--seed', type=int, default=42,
                         help="random seed for initialization")
-    parser.add_argument('--gradient_accumulation_steps', type=int, default=1,
+    parser.add_argument('--gradient_accumulation_steps', type=int, default=4,
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
     arguments = parser.parse_args()
     main(arguments)

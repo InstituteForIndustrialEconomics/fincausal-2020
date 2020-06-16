@@ -26,6 +26,8 @@ class BertForMultitaskLearning(BertPreTrainedModel):
         self.sequence_classifier = nn.Linear(config.hidden_size, self.num_sequence_labels)
         self.text_classifier = nn.Linear(config.hidden_size, self.num_text_labels)
 
+        print(self.num_text_labels, self.num_sequence_labels)
+
         self.init_weights()
 
     def forward(
@@ -55,8 +57,8 @@ class BertForMultitaskLearning(BertPreTrainedModel):
         sequence_output = self.dropout(sequence_output)
         pooled_output = self.dropout(pooled_output)
 
-        text_logits = self.text_classifier(sequence_output)
-        sequence_logits = self.sequence_classifier(pooled_output)
+        text_logits = self.text_classifier(pooled_output)
+        sequence_logits = self.sequence_classifier(sequence_output)
 
         outputs = (sequence_logits,
                    text_logits) + outputs[2:]  # add hidden states and attention if they are here
@@ -67,7 +69,7 @@ class BertForMultitaskLearning(BertPreTrainedModel):
                                                     text_labels.view(-1))
 
         active_loss = attention_mask.view(-1) == 1
-        if tag_labels is not None:
+        if sequence_labels is not None:
             loss_fct = CrossEntropyLoss(ignore_index=self.padding_index)
             active_labels = sequence_labels.view(-1)[active_loss]
             active_logits = sequence_logits.view(-1, self.num_sequence_labels)[active_loss]
