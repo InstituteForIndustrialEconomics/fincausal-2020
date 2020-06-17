@@ -31,7 +31,7 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s
 logger = logging.getLogger(__name__)
 
 
-def compute_prec_rec_f1(text_preds, text_labels, sequence_preds, sequence_labels, label2id):
+def compute_metrics(text_preds, text_labels, sequence_preds, sequence_labels, label2id):
     eval_seqience_labs = [
         label2id['sequence'][x] for x in label2id['sequence'] if x != '0'
     ]
@@ -119,7 +119,7 @@ def evaluate(
         preds[key] = preds[key].argmax(axis=-1)
 
     if compute_scores:
-        result = compute_prec_rec_f1(
+        result = compute_metrics(
             preds['text'], eval_text_labels_ids.numpy(),
             np.array([x for y in preds['sequence'] for x in y]),
             np.array([x for y in eval_sequence_labels_ids.numpy() for x in y]),
