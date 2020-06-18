@@ -1,5 +1,6 @@
 from transformers.tokenization_bert import BertTokenizer
 from transformers.tokenization_xlnet import XLNetTokenizer
+from transformers.configuration_bert import BertConfig
 from torch.utils.data import DataLoader, TensorDataset
 from .multitask_bert import BertForMultitaskLearning
 import torch
@@ -160,7 +161,6 @@ def convert_examples_to_features_for_bert(
         input_mask = attention_mask
         padding_length = (max_seq_length - len(input_ids))
 
-        sequence_labels
         input_ids += tokenizer.convert_tokens_to_ids([pad_token]) * padding_length
         input_mask += [0] * padding_length
         segment_ids = [0] * len(input_ids)
@@ -225,7 +225,7 @@ def create_examples(dataset, set_type):
 
 
 def get_dataloader_and_text_ids_with_sequence_ids(
-        features: InputFeatures,
+        features: list,
         batch_size: int
     ):
     input_ids = torch.tensor(
@@ -265,3 +265,8 @@ tokenizers = {
 models = {
     "bert-large-uncased": BertForMultitaskLearning
 }
+
+configs = {
+    "bert-large-uncased": BertConfig
+}
+

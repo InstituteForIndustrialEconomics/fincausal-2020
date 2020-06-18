@@ -165,6 +165,31 @@ def create_merged_train_examples(
     return examples
 
 
+def create_test_examples(
+        path_to_test: str,
+        sep: str = "; "
+    ):
+    """
+
+    :param path_to_test: path to test csv file
+    :param sep: columns separator in csv file
+    :return: list of examples, where each example is a dictionary
+    """
+    test = csv_reader(path_to_test, sep=sep)
+    examples = []
+    for row in test.itertuples():
+        tokens = nltk.word_tokenize(row.text)
+        example = {
+            "idx": row.idx,
+            "text": row.text,
+            "tokens": tokens,
+            "text_label": '0',
+            "sequence_labels": ['0'] * len(tokens)
+        }
+        examples.append(example)
+    return examples
+
+
 def get_formatted_labels(
         label: str,
         labels_len: int,
