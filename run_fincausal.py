@@ -14,14 +14,15 @@ from scipy.special import softmax
 from torch.nn import CrossEntropyLoss
 from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 from transformers.file_utils import PYTORCH_PRETRAINED_BERT_CACHE, WEIGHTS_NAME, CONFIG_NAME
+
 from tqdm import tqdm
 from models.examples_to_features import (
     examples_to_features_converters, InputExample,
     create_examples, get_dataloader_and_text_ids_with_sequence_ids,
-    models, tokenizers, DataProcessor
+    models, tokenizers, DataProcessor, configs
 )
 from collections import defaultdict
-from sklearn.metrics import precision_recall_fscore_support
+from sklearn.metrics import precision_recall_fscore_support, classification_report
 from torch.nn import CrossEntropyLoss
 
 
@@ -29,11 +30,12 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s
                     datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
+eval_logger = logging.getLogger("__scores__")
 
 
-def compute_metrics(text_preds, text_labels, sequence_preds, sequence_labels, label2id):
-    eval_seqience_labs = [
-        label2id['sequence'][x] for x in label2id['sequence'] if x != '0'
+def compute_metrics(text_labels, text_preds, sequence_labels, sequence_preds, label2id):
+    eval_sequence_labels = [
+        (label2id['sequence'][x]) for x in label2id['sequence'] if x != '0'
     ]
     text_p, text_r, text_f1, _ = precision_recall_fscore_support(
         text_labels, text_preds,
@@ -41,16 +43,32 @@ def compute_metrics(text_preds, text_labels, sequence_preds, sequence_labels, la
     )
     seq_p, seq_r, seq_f1, _ = precision_recall_fscore_support(
         sequence_labels, sequence_preds,
-        labels=eval_seqience_labs, average="weighted"
+        labels=eval_sequence_labels, average="weighted"
     )
-    result = {
-        'text_f1': text_f1,
-        'text_p': text_p,
-        'text_r': text_r,
-        'sequence_f1': seq_f1,
-        'sequence_p': seq_p,
-        'sequence_r': seq_r
+
+    task_1_report = classification_report(
+        text_labels, text_preds, labels=[0, 1], output_dict=True
+    )
+    task_2_report = classification_report(
+        sequence_labels, sequence_preds, labels=eval_sequence_labels, output_dict=True
+    )
+
+    result = {}
+    for x in ['0', '1', 'weighted avg']:
+        for metrics in ['precision', 'recall', 'f1-score', 'support']:
+            result[f"text_{x}_{metrics}"] = round(task_1_report[x][metrics], 6)
+
+    id2label = {
+        val: key for key, val in label2id['sequence'].items()
     }
+    id2label['weighted avg'] = 'weighted avg'
+    for x in eval_sequence_labels + ['weighted avg']:
+        for metrics in ['precision', 'recall', 'f1-score', 'support']:
+            result[f"sequence_{id2label[x]}_{metrics}"] = round(task_2_report[str(x)][metrics], 6)
+
+    eval_logger.info("=====================================")
+    for key in sorted(result.keys()):
+        eval_logger.info("  %s = %s", key, str(result[key]))
     return result
 
 
@@ -120,9 +138,9 @@ def evaluate(
 
     if compute_scores:
         result = compute_metrics(
-            preds['text'], eval_text_labels_ids.numpy(),
-            np.array([x for y in preds['sequence'] for x in y]),
+            eval_text_labels_ids.numpy(), preds['text'],
             np.array([x for y in eval_sequence_labels_ids.numpy() for x in y]),
+            np.array([x for y in preds['sequence'] for x in y]),
             label2id
         )
     else:
@@ -165,11 +183,9 @@ def main(args):
         os.makedirs(args.output_dir)
 
     if args.do_train:
-        if os.path.exists(os.path.join(args.output_dir, 'train.log')):
-            suffix = datetime.now().isoformat().replace('-', '_').replace(':', '_').split('.')[0].replace('T', '-')
-            log_file = os.path.join(args.output_dir, 'train.log')
-            os.system(f'cp {log_file} {log_file}_dump_at_{suffix}.log')
-        logger.addHandler(logging.FileHandler(os.path.join(args.output_dir, "train.log"), 'w'))
+        suffix = datetime.now().isoformat().replace('-', '_').replace(':', '_').split('.')[0].replace('T', '-')
+        logger.addHandler(logging.FileHandler(os.path.join(args.output_dir, f"train_{suffix}.log"), 'w'))
+        eval_logger.addHandler(logging.FileHandler(os.path.join(args.output_dir, f"scores_{suffix}.log"), 'w'))
     else:
         logger.addHandler(logging.FileHandler(os.path.join(args.output_dir, "eval.log"), 'w'))
     logger.info(args)
@@ -244,13 +260,20 @@ def main(args):
         lrs = [args.learning_rate] if args.learning_rate else \
             [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
         for lr in lrs:
+            config = configs[args.model]
+            config = config.from_pretrained(
+                args.model,
+                hidden_dropout_prob=args.dropout
+            )
             model = models[args.model].from_pretrained(
                 args.model, cache_dir=str(PYTORCH_PRETRAINED_BERT_CACHE),
                 num_text_labels=num_text_labels,
                 num_sequence_labels=num_sequence_labels,
                 sequence_clf_weight=args.sequence_clf_weight,
-                text_clf_weight=args.text_clf_weight
+                text_clf_weight=args.text_clf_weight,
+                config=config
             )
+            print("text and sequence tasks weights:", model.text_clf_weight, model.sequence_clf_weight)
             model.to(device)
 
             if n_gpu > 1:
@@ -466,7 +489,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--eval_per_epoch", default=3, type=int,
                         help="How many times to do validation on dev set per epoch")
-    parser.add_argument("--max_seq_length", default=512, type=int,
+    parser.add_argument("--max_seq_length", default=256, type=int,
                         help="The maximum total input sequence length after WordPiece tokenization.\n"
                              "Sequences longer than this will be truncated, and sequences shorter\n"
                              "than this will be padded.")
@@ -481,7 +504,7 @@ if __name__ == "__main__":
                         help="Total batch size for training.")
     parser.add_argument("--eval_batch_size", default=8, type=int,
                         help="Total batch size for eval.")
-    parser.add_argument("--eval_metric", default="text_f1", type=str)
+    parser.add_argument("--eval_metric", default="text_weighted avg_f1-score", type=str)
     parser.add_argument("--learning_rate", default=None, type=float,
                         help="The initial learning rate for Adam.")
     parser.add_argument("--num_train_epochs", default=5.0, type=float,
@@ -493,14 +516,15 @@ if __name__ == "__main__":
                         help="maximal gradient norm")
 
     parser.add_argument("--text_clf_weight", default=1.0, type=float,
-                        help="Proportion of training to perform linear learning rate warmup for. "
-                             "E.g., 0.1 = 10%% of training.")
+                        help="the weight of text classification task")
     parser.add_argument("--sequence_clf_weight", default=1.0, type=float,
-                        help="Proportion of training to perform linear learning rate warmup for. "
-                             "E.g., 0.1 = 10%% of training.")
+                        help="The weight of sequence labeling task")
 
     parser.add_argument("--weight_decay", default=0.1, type=float,
                         help="weight_decay coefficient for regularization")
+    parser.add_argument("--dropout", default=0.1, type=float,
+                        help="dropout rate")
+
     parser.add_argument("--no_cuda", action='store_true',
                         help="Whether not to use CUDA when available")
     parser.add_argument('--seed', type=int, default=42,
