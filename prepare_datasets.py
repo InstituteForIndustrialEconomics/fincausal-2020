@@ -21,7 +21,7 @@ def save_data_splits(tag_format: str, overwrite_test_set: bool = False):
             'data/practice-task-2.csv'
         ],
         sep='; ',
-        tag_format='bieo',
+        tag_format=tag_format,
         validation_ratio=0.2
     )
     json.dump(train, open(f"data/{tag_format}_train.json", "w"))
