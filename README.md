@@ -11,6 +11,11 @@ pip install -r requirements.txt
 deactivate
 ```
 
+To prepare the data in **bio**, **bieo** or **se** formats run:
+```bash
+python prepare_datasets.py tag_format
+```
+
 To train the model run:
 ```bash
 python run_fincausal.py \
