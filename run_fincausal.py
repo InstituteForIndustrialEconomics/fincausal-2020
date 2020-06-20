@@ -431,7 +431,7 @@ def main(args):
             )
         ]
         aggregated_results[f'{task}_scores'] = [
-            list(score[orig_positions]) + [0.999] * (len(ex.sentence) - len(orig_positions))
+            list(score[orig_positions]) + [0.999] * (len(ex.tokens) - len(orig_positions))
             for score, orig_positions, ex in zip(
                 scores[task],
                 eval_orig_positions_map,
@@ -462,6 +462,12 @@ def main(args):
             'sequence_scores': [
                 ' '.join([str(score) for score in enumerate(sent)])
                 for sent in aggregated_results['sequence_scores']
+            ],
+            'task_id': [
+                ex.task_id for ex in eval_examples
+            ],
+            'text': [
+                ex.text for ex in eval_examples
             ]
         }
 
