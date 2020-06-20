@@ -42,3 +42,15 @@ To show all hyperparameters of the model:
 ```bash
 python run_fincausal.py -h
 ```
+
+To score task 1 predictions run:
+```bash
+python scoring/task_1_evaluate.py from-file \
+    --ref_file path_to_ref_csv path_to_pred_csv
+```
+
+To score task 2 predictions run:
+```bash
+python scoring/task2_evaluate.py from-file \
+    --ref_file path_to_ref_csv path_to_pred_csv
+```
