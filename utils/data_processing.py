@@ -213,6 +213,9 @@ def get_formatted_labels(
         labels = [f"I-{label}"] * labels_len
         labels[-1] = f"E-{label}"
         labels[0] = f"B-{label}"
+    
+    else:
+        raise ValueError
 
     return labels
 

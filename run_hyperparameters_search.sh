@@ -5,15 +5,15 @@ train_batch_size=32
 gradient_accumulation_steps=4
 eval_per_epoch=4
 
-for lr in 5e-5 1e-5;
+for lr in 5e-5;
 do
-  for seq_weight in 0.0 0.03 0.1 0.2 0.3;
+  for seq_weight in 0.3;
   do
     for text_weight in 1.0;
     do
-      for wd in 0.1 0.2;
+      for wd in 0.2;
       do
-        for drop in 0.1 0.15
+        for drop in 0.1
         do
           CUDA_VISIBLE_DEVICES="$1" python run_fincausal.py \
             --model "bert-large-uncased" \
