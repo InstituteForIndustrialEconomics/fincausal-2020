@@ -52,6 +52,7 @@ def merge_tasks(
             new_df["gold"].append("0")
             new_df["causes"].append([])
             new_df["effects"].append([])
+            new_df["task_id"].append("1")
         else:
             new_df["gold"].append("1")
             causes = set(cur_df.cause)
@@ -67,6 +68,8 @@ def merge_tasks(
             else:
                 new_df["causes"].append(list(causes))
                 new_df["effects"].append(list(effects))
+
+            new_df["task_id"].append("2")
 
     new_df = pd.DataFrame(new_df)
     return new_df
@@ -154,7 +157,8 @@ def create_merged_train_examples(
             "text": row.text,
             "tokens": tokens,
             "text_label": row.gold,
-            "sequence_labels": labels
+            "sequence_labels": labels,
+            "task_id": row.task_id
         }
         examples.append(example)
 
@@ -184,7 +188,8 @@ def create_test_examples(
             "text": row.text,
             "tokens": tokens,
             "text_label": '0',
-            "sequence_labels": ['0'] * len(tokens)
+            "sequence_labels": ['0'] * len(tokens),
+            "task_id": "1+2"
         }
         examples.append(example)
     return examples
@@ -243,3 +248,34 @@ def get_train_and_validation_examples(
         stratify=[ex["text_label"] for ex in examples]
     )
     return train, validation
+
+
+def write_task_1_predictions(
+        task_1_predictions_csv: str,
+        output_file: str
+    ):
+    predictions = pd.read_csv(task_1_predictions_csv, sep='\t')
+    with open(output_file, 'w') as f:
+        print("Index; Text; Prediction", file=f)
+        for row in predictions.itertuples():
+            idx = row.idx.split("-")[1]
+            text = row.text
+            pred = row.text_pred
+            print("; ".join([idx, text, pred]), file=f)
+
+
+def write_task_2_predictions(
+        task_2_predictions_csv: str,
+        output_file: str
+    ):
+    # TODO: implement span constructing strategy
+    predictions = pd.read_csv(task_2_predictions_csv, sep='\t')
+    with open(output_file, 'w') as f:
+        print("Index; Text; Cause; Effect", file=f)
+        for row in predictions.itertuples():
+            idx = row.idx.split("-")[1]
+            text = row.text
+            pred = row.text_pred
+            print("; ".join([idx, text, pred]), file=f)
+
+
