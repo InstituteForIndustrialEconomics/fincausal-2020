@@ -23,8 +23,8 @@ def csv_reader(
             "Offset_Sentence3": float, "Cause_Start": int,
             "Cause_End": int, "Effect_Start": int, "Effect_End": int,
             "Sentence": str
-            }
-        )
+        }
+    )
     result.columns = [column.lower() for column in result.columns]
     result = result.rename(mapper={"index": index_name}, axis=1)
     result = result[~result.text.isna()]
@@ -61,10 +61,10 @@ def merge_tasks(
             if not (len(causes) == 1 or len(effects) == 1):
                 new_df["causes"].append(
                     [cur_df.cause.values[0]]
-                    )
+                )
                 new_df["effects"].append(
                     [cur_df.effect.values[0]]
-                    )
+                )
             else:
                 new_df["causes"].append(list(causes))
                 new_df["effects"].append(list(effects))
@@ -213,7 +213,7 @@ def get_formatted_labels(
         labels = [f"I-{label}"] * labels_len
         labels[-1] = f"E-{label}"
         labels[0] = f"B-{label}"
-    
+
     else:
         raise ValueError
 
@@ -263,7 +263,7 @@ def write_task_1_predictions(
         for row in predictions.itertuples():
             idx = row.idx.split("-")[1]
             text = row.text
-            pred = row.text_pred
+            pred = str(row.text_pred)
             print("; ".join([idx, text, pred]), file=f)
 
 

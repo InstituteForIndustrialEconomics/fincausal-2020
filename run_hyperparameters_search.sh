@@ -1,26 +1,26 @@
 tag_fmt=$2
-num_train_epochs=5
+num_train_epochs=10
 max_seq_length=128
 train_batch_size=32
 gradient_accumulation_steps=4
 eval_per_epoch=4
 
-for lr in 5e-5;
+for lr in 5e-5 2e-5;
 do
-  for seq_weight in 0.3;
+  for seq_weight in 1.0;
   do
-    for text_weight in 1.0;
+    for text_weight in 0.0;
     do
-      for wd in 0.2;
+      for wd in 0.2 0.1;
       do
-        for drop in 0.1
+        for drop in 0.1 0.2
         do
           CUDA_VISIBLE_DEVICES="$1" python run_fincausal.py \
             --model "bert-large-uncased" \
             --data_dir "data" \
             --do_train \
             --do_validate \
-            --output_dir "bert_models/best_text/lr-$lr.text_weight-$text_weight-seq_weight-$seq_weight.wd-$wd.drop-$drop.tag_fmt-$tag_fmt" \
+            --output_dir "bert_models/best_sequence/lr-$lr.text_weight-$text_weight-seq_weight-$seq_weight.wd-$wd.drop-$drop.tag_fmt-$tag_fmt" \
             --max_seq_length "$max_seq_length" \
             --train_batch_size "$train_batch_size" \
             --gradient_accumulation_steps "$gradient_accumulation_steps" \
@@ -32,7 +32,8 @@ do
             --sequence_clf_weight $seq_weight \
             --learning_rate $lr \
             --tag_format "$tag_fmt" \
-            --eval_metric "text_weighted avg_f1-score";
+            --eval_metric "sequence_weighted avg_f1-score" \
+            --only_task_2;
           done
         done
     done
