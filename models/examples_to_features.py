@@ -12,30 +12,34 @@ from collections import Counter
 class InputExample(object):
 
     def __init__(
-            self, guid, tokens, text_label, sequence_labels, text
+            self, guid, tokens, text_label,
+            sequence_labels, text, task_id
         ):
         self.guid = guid
         self.tokens = tokens
         self.text_label = text_label
         self.sequence_labels = sequence_labels
         self.text = text
+        self.task_id = task_id
 
 
 class DataProcessor(object):
     """Processor for the FINCAUSAL data set."""
 
-    def __init__(self, tag_format: str = "bio"):
+    def __init__(self, tag_format: str = "bio", filter_non_causal: bool = False):
         self.tag_format = tag_format
+        self.filter_non_causal = filter_non_causal
 
-    @classmethod
-    def _read_json(cls, input_file):
+    def _read_json(self, input_file):
         with open(input_file, "r", encoding='utf-8') as reader:
             data = json.load(reader)
+            if self.filter_non_causal:
+                data = [ex for ex in data if str(ex["text_label"]) != "0"]
         return data
 
     def get_train_examples(self, data_dir):
         """See base class."""
-        return create_examples(
+        return self.create_examples(
             self._read_json(
                 os.path.join(data_dir, f"{self.tag_format}_train.json")
             ),
@@ -44,7 +48,7 @@ class DataProcessor(object):
 
     def get_dev_examples(self, data_dir):
         """See base class."""
-        return create_examples(
+        return self.create_examples(
             self._read_json(
                 os.path.join(data_dir, f"{self.tag_format}_valid.json")
             ),
@@ -53,7 +57,7 @@ class DataProcessor(object):
 
     def get_test_examples(self, test_file):
         """See base class."""
-        return create_examples(
+        return self.create_examples(
             self._read_json(test_file), "test")
 
     def get_text_labels(self, data_dir, logger=None):
@@ -89,6 +93,22 @@ class DataProcessor(object):
             if label not in labels:
                 labels.append(label)
         return labels
+
+    def create_examples(self, dataset, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for example in dataset:
+            examples.append(
+                InputExample(
+                    guid=f'{set_type}-{example["idx"]}',
+                    tokens=example["tokens"],
+                    text_label=example["text_label"],
+                    sequence_labels=example["sequence_labels"],
+                    text=example["text"],
+                    task_id=example["task_id"]
+                )
+            )
+        return examples
 
 
 class InputFeatures(object):
@@ -206,22 +226,6 @@ def convert_examples_to_features_for_bert(
                                                                        num_fit_examples * 100.0 / len(examples),
                                                                        max_seq_length))
     return features
-
-
-def create_examples(dataset, set_type):
-    """Creates examples for the training and dev sets."""
-    examples = []
-    for example in dataset:
-        examples.append(
-            InputExample(
-                guid=f'{set_type}-{example["idx"]}',
-                tokens=example["tokens"],
-                text_label=example["text_label"],
-                sequence_labels=example["sequence_labels"],
-                text=example["text"]
-            )
-        )
-    return examples
 
 
 def get_dataloader_and_text_ids_with_sequence_ids(

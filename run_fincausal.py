@@ -18,7 +18,7 @@ from transformers.file_utils import PYTORCH_PRETRAINED_BERT_CACHE, WEIGHTS_NAME,
 from tqdm import tqdm
 from models.examples_to_features import (
     examples_to_features_converters, InputExample,
-    create_examples, get_dataloader_and_text_ids_with_sequence_ids,
+    get_dataloader_and_text_ids_with_sequence_ids,
     models, tokenizers, DataProcessor, configs
 )
 from collections import defaultdict
@@ -191,7 +191,12 @@ def main(args):
     logger.info(args)
     logger.info("device: {}, n_gpu: {}".format(device, n_gpu))
 
-    processor = DataProcessor(tag_format=args.tag_format)
+    processor = DataProcessor(tag_format=args.tag_format, filter_non_causal=args.only_task_2)
+    if args.only_task_2:
+        assert args.text_clf_weight == 0.0, f"Training only on task 2 requires to set " \
+                                            f"text_clf_weight to zero. {args.text_clf_weight} passed."
+        assert args.eval_metric.startswith('sequence'), f"Training only on task 2 requires to set task 2 related " \
+                                                        f"metric. {args.eval_metric} passed."
     text_labels_list = processor.get_text_labels(args.data_dir, logger)
     sequence_labels_list = processor.get_sequence_labels(args.data_dir, logger)
 
@@ -216,7 +221,8 @@ def main(args):
     num_text_labels = len(text_labels_list)
     num_sequence_labels = len(sequence_labels_list) + 1
 
-    do_lower_case = 'uncased' in args.model
+    # do_lower_case = 'uncased' in args.model
+    do_lower_case = True
     tokenizer = tokenizers[args.model].from_pretrained(args.model, do_lower_case=do_lower_case)
     convert_examples_to_features = examples_to_features_converters[args.model]
 
@@ -364,13 +370,14 @@ def main(args):
                         result['epoch'] = epoch
                         result['learning_rate'] = lr
                         result['batch_size'] = args.train_batch_size
-                        logger.info("First 20 predictions:")
-                        for text_pred, text_label in zip(
-                                preds['text'][:20],
-                                eval_text_labels_ids.numpy()[:20]):
-                            sign = u'\u2713' if text_pred == text_label else u'\u2718'
-                            logger.info("pred = %s, label = %s %s" % (id2label['text'][text_pred],
-                                                                      id2label['text'][text_label], sign))
+                        if not args.only_task_2:
+                            logger.info("First 20 predictions:")
+                            for text_pred, text_label in zip(
+                                    preds['text'][:20],
+                                    eval_text_labels_ids.numpy()[:20]):
+                                sign = u'\u2713' if text_pred == text_label else u'\u2718'
+                                logger.info("pred = %s, label = %s %s" % (id2label['text'][text_pred],
+                                                                          id2label['text'][text_label], sign))
 
                         if (best_result is None) or (result[args.eval_metric] > best_result[args.eval_metric]):
                             best_result = result
@@ -407,7 +414,7 @@ def main(args):
 
         model = models[args.model].from_pretrained(
             args.output_dir, num_sequence_labels=num_sequence_labels,
-            num_relation_labels=num_relation_labels,
+            num_text_labels=num_text_labels,
             text_clf_weight=args.text_clf_weight,
             sequence_clf_weight=args.sequence_clf_weight,
         )
@@ -422,6 +429,7 @@ def main(args):
 
         aggregated_results = {}
         task = "sequence"
+        eval_orig_positions_map = [ex.orig_positions_map for ex in eval_features]
         aggregated_results[task] = [
             list(pred[orig_positions]) + [label2id[task]['0']] * (len(ex.tokens) - len(orig_positions))
             for pred, orig_positions, ex in zip(
@@ -430,6 +438,7 @@ def main(args):
                 eval_examples
             )
         ]
+
         aggregated_results[f'{task}_scores'] = [
             list(score[orig_positions]) + [0.999] * (len(ex.tokens) - len(orig_positions))
             for score, orig_positions, ex in zip(
@@ -456,11 +465,11 @@ def main(args):
                 id2label['text'][x] for x in preds['text']
             ],
             'sequence_pred': [
-                ' '.join([id2label['sequence'][x] for x in sent])
+                ' '.join([id2label['sequence'][x] if x != 0 else '0' for x in sent])
                 for sent in aggregated_results['sequence']
             ],
             'sequence_scores': [
-                ' '.join([str(score) for score in enumerate(sent)])
+                ' '.join([str(score) for score in sent])
                 for sent in aggregated_results['sequence_scores']
             ],
             'task_id': [
@@ -537,5 +546,7 @@ if __name__ == "__main__":
                         help="random seed for initialization")
     parser.add_argument('--gradient_accumulation_steps', type=int, default=4,
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
+    parser.add_argument("--only_task_2", action="store_true",
+                        help="whether to train only task 2 without multi-task learning")
     arguments = parser.parse_args()
     main(arguments)
