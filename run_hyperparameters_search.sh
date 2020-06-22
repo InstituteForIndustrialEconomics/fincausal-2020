@@ -5,7 +5,7 @@ train_batch_size=32
 gradient_accumulation_steps=4
 eval_per_epoch=16
 
-for lr in 1e-4 5e-4 7e-4;
+for lr in 1e-5 7e-6;
 do
   for seq_weight in 1.0;
   do
@@ -20,7 +20,7 @@ do
             --data_dir "data" \
             --do_train \
             --do_validate \
-            --output_dir "tmp_2_bert_models/best_sequence_16_per_epoch/lr-$lr.text_weight-$text_weight-seq_weight-$seq_weight.wd-$wd.drop-$drop.tag_fmt-$tag_fmt" \
+            --output_dir "first_bert_models/best_sequence_16_per_epoch_const_lr/lr-$lr.text_weight-$text_weight-seq_weight-$seq_weight.wd-$wd.drop-$drop.tag_fmt-$tag_fmt" \
             --max_seq_length "$max_seq_length" \
             --train_batch_size "$train_batch_size" \
             --gradient_accumulation_steps "$gradient_accumulation_steps" \
@@ -33,7 +33,8 @@ do
             --learning_rate $lr \
             --tag_format "$tag_fmt" \
             --eval_metric "sequence_weighted avg_f1-score" \
-            --only_bert_ner;
+            --only_bert_ner \
+            --bert_ner_pool_type "first";
           done
         done
     done
