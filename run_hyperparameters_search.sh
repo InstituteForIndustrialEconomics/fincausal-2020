@@ -3,24 +3,24 @@ num_train_epochs=10
 max_seq_length=128
 train_batch_size=32
 gradient_accumulation_steps=4
-eval_per_epoch=4
+eval_per_epoch=16
 
-for lr in 5e-5 2e-5;
+for lr in 1e-4 5e-4 7e-4;
 do
   for seq_weight in 1.0;
   do
     for text_weight in 0.0;
     do
-      for wd in 0.2 0.1;
+      for wd in 0.1;
       do
-        for drop in 0.1 0.2
+        for drop in 0.3 0.5
         do
           CUDA_VISIBLE_DEVICES="$1" python run_fincausal.py \
             --model "bert-large-uncased" \
             --data_dir "data" \
             --do_train \
             --do_validate \
-            --output_dir "bert_models/best_sequence/lr-$lr.text_weight-$text_weight-seq_weight-$seq_weight.wd-$wd.drop-$drop.tag_fmt-$tag_fmt" \
+            --output_dir "tmp_bert_models/best_sequence_16_per_epoch/lr-$lr.text_weight-$text_weight-seq_weight-$seq_weight.wd-$wd.drop-$drop.tag_fmt-$tag_fmt" \
             --max_seq_length "$max_seq_length" \
             --train_batch_size "$train_batch_size" \
             --gradient_accumulation_steps "$gradient_accumulation_steps" \

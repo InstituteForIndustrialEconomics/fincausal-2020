@@ -17,7 +17,6 @@ from transformers.file_utils import PYTORCH_PRETRAINED_BERT_CACHE, WEIGHTS_NAME,
 
 from tqdm import tqdm
 from models.examples_to_features import (
-    examples_to_features_converters, InputExample,
     get_dataloader_and_text_ids_with_sequence_ids,
     models, tokenizers, DataProcessor, configs
 )
@@ -224,10 +223,35 @@ def main(args):
     # do_lower_case = 'uncased' in args.model
     do_lower_case = True
     tokenizer = tokenizers[args.model].from_pretrained(args.model, do_lower_case=do_lower_case)
-    convert_examples_to_features = examples_to_features_converters[args.model]
+
+    if args.do_train:
+        config = configs[args.model]
+        config = config.from_pretrained(
+            args.model,
+            hidden_dropout_prob=args.dropout
+        )
+        model = models[args.model].from_pretrained(
+            args.model, cache_dir=str(PYTORCH_PRETRAINED_BERT_CACHE),
+            num_text_labels=num_text_labels,
+            num_sequence_labels=num_sequence_labels,
+            sequence_clf_weight=args.sequence_clf_weight,
+            text_clf_weight=args.text_clf_weight,
+            config=config
+        )
+        print("text and sequence tasks weights:", model.text_clf_weight, model.sequence_clf_weight)
+
+    else:
+        model = models[args.model].from_pretrained(
+            args.output_dir, num_sequence_labels=num_sequence_labels,
+            num_text_labels=num_text_labels,
+            text_clf_weight=args.text_clf_weight,
+            sequence_clf_weight=args.sequence_clf_weight,
+        )
+
+    model.to(device)
 
     eval_examples = processor.get_dev_examples(args.data_dir)
-    eval_features = convert_examples_to_features(
+    eval_features = model.convert_examples_to_features(
         eval_examples, label2id, args.max_seq_length, tokenizer, logger
     )
     logger.info("***** Dev *****")
@@ -238,7 +262,7 @@ def main(args):
 
     if args.do_train:
         train_examples = processor.get_train_examples(args.data_dir)
-        train_features = convert_examples_to_features(
+        train_features = model.convert_examples_to_features(
             train_examples, label2id,
             args.max_seq_length, tokenizer, logger
         )
@@ -263,146 +287,130 @@ def main(args):
 
         best_result = None
         eval_step = max(1, len(train_batches) // args.eval_per_epoch)
-        lrs = [args.learning_rate] if args.learning_rate else \
-            [1e-6, 2e-6, 3e-6, 5e-6, 1e-5, 2e-5, 3e-5, 5e-5]
-        for lr in lrs:
-            config = configs[args.model]
-            config = config.from_pretrained(
-                args.model,
-                hidden_dropout_prob=args.dropout
-            )
-            model = models[args.model].from_pretrained(
-                args.model, cache_dir=str(PYTORCH_PRETRAINED_BERT_CACHE),
-                num_text_labels=num_text_labels,
-                num_sequence_labels=num_sequence_labels,
-                sequence_clf_weight=args.sequence_clf_weight,
-                text_clf_weight=args.text_clf_weight,
-                config=config
-            )
-            print("text and sequence tasks weights:", model.text_clf_weight, model.sequence_clf_weight)
-            model.to(device)
+        lr = float(args.learning_rate)
 
-            if n_gpu > 1:
-                model = torch.nn.DataParallel(model)
 
-            param_optimizer = list(model.named_parameters())
-            no_decay = ['bias', 'LayerNorm.weight']
-            optimizer_grouped_parameters = [
-                {
-                    'params': [
-                        param for name, param in param_optimizer
-                        if not any(nd in name for nd in no_decay)
-                    ],
-                    'weight_decay': float(args.weight_decay)
-                },
-                {
-                    'params': [
-                        param for name, param in param_optimizer
-                        if any(nd in name for nd in no_decay)
-                    ],
-                    'weight_decay': 0.0
-                }
-            ]
+        if n_gpu > 1:
+            model = torch.nn.DataParallel(model)
 
-            optimizer = AdamW(
-                optimizer_grouped_parameters,
-                lr=lr
-            )
-            scheduler = get_linear_schedule_with_warmup(
-                optimizer,
-                num_warmup_steps=warmup_steps,
-                num_training_steps=num_train_optimization_steps
-            )
+        param_optimizer = list(model.named_parameters())
+        no_decay = ['bias', 'LayerNorm.weight']
+        optimizer_grouped_parameters = [
+            {
+                'params': [
+                    param for name, param in param_optimizer
+                    if not any(nd in name for nd in no_decay)
+                ],
+                'weight_decay': float(args.weight_decay)
+            },
+            {
+                'params': [
+                    param for name, param in param_optimizer
+                    if any(nd in name for nd in no_decay)
+                ],
+                'weight_decay': 0.0
+            }
+        ]
 
-            start_time = time.time()
-            global_step = 0
-            tr_loss = 0
-            nb_tr_examples = 0
-            nb_tr_steps = 0
-            for epoch in range(1, 1 + int(args.num_train_epochs)):
-                model.train()
-                logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
-                if args.train_mode == 'random' or args.train_mode == 'random_sorted':
-                    random.shuffle(train_batches)
-                    
-                for step, batch in enumerate(tqdm(train_batches, total=len(train_batches), desc='fitting ... ')):
-                    batch = tuple(t.to(device) for t in batch)
-                    input_ids, input_mask, segment_ids, text_labels_ids, sequence_labels_ids = batch
-                    loss = model(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask,
-                                 text_labels=text_labels_ids,
-                                 sequence_labels=sequence_labels_ids)
+        optimizer = AdamW(
+            optimizer_grouped_parameters,
+            lr=lr
+        )
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=warmup_steps,
+            num_training_steps=num_train_optimization_steps
+        )
 
-                    if n_gpu > 1:
-                        loss = loss.mean()
+        start_time = time.time()
+        global_step = 0
+        tr_loss = 0
+        nb_tr_examples = 0
+        nb_tr_steps = 0
+        for epoch in range(1, 1 + int(args.num_train_epochs)):
+            model.train()
+            logger.info("Start epoch #{} (lr = {})...".format(epoch, lr))
+            if args.train_mode == 'random' or args.train_mode == 'random_sorted':
+                random.shuffle(train_batches)
 
-                    if args.gradient_accumulation_steps > 1:
-                        loss = loss / args.gradient_accumulation_steps
+            for step, batch in enumerate(tqdm(train_batches, total=len(train_batches), desc='fitting ... ')):
+                batch = tuple(t.to(device) for t in batch)
+                input_ids, input_mask, segment_ids, text_labels_ids, sequence_labels_ids = batch
+                loss = model(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask,
+                             text_labels=text_labels_ids,
+                             sequence_labels=sequence_labels_ids)
 
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                if n_gpu > 1:
+                    loss = loss.mean()
 
-                    tr_loss += loss.item()
-                    nb_tr_examples += input_ids.size(0)
-                    nb_tr_steps += 1
+                if args.gradient_accumulation_steps > 1:
+                    loss = loss / args.gradient_accumulation_steps
 
-                    if (step + 1) % args.gradient_accumulation_steps == 0:
-                        optimizer.step()
-                        scheduler.step()
-                        optimizer.zero_grad()
-                        global_step += 1
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
-                    if args.do_validate and (step + 1) % eval_step == 0:
-                        logger.info('Epoch: {}, Step: {} / {}, used_time = {:.2f}s, loss = {:.6f}'.format(
-                                epoch, step + 1, len(train_batches),
-                                time.time() - start_time, tr_loss / nb_tr_steps
-                            )
+                tr_loss += loss.item()
+                nb_tr_examples += input_ids.size(0)
+                nb_tr_steps += 1
+
+                if (step + 1) % args.gradient_accumulation_steps == 0:
+                    optimizer.step()
+                    scheduler.step()
+                    optimizer.zero_grad()
+                    global_step += 1
+
+                if args.do_validate and (step + 1) % eval_step == 0:
+                    logger.info('Epoch: {}, Step: {} / {}, used_time = {:.2f}s, loss = {:.6f}'.format(
+                            epoch, step + 1, len(train_batches),
+                            time.time() - start_time, tr_loss / nb_tr_steps
                         )
-                        save_model = False
+                    )
+                    save_model = False
 
-                        preds, result, scores = evaluate(
-                            model, device, eval_dataloader, eval_text_labels_ids,
-                            eval_sequence_labels_ids,
-                            num_text_labels, num_sequence_labels,
-                            label2id
+                    preds, result, scores = evaluate(
+                        model, device, eval_dataloader, eval_text_labels_ids,
+                        eval_sequence_labels_ids,
+                        num_text_labels, num_sequence_labels,
+                        label2id
+                    )
+                    model.train()
+                    result['global_step'] = global_step
+                    result['epoch'] = epoch
+                    result['learning_rate'] = lr
+                    result['batch_size'] = args.train_batch_size
+                    if not args.only_task_2:
+                        logger.info("First 20 predictions:")
+                        for text_pred, text_label in zip(
+                                preds['text'][:20],
+                                eval_text_labels_ids.numpy()[:20]):
+                            sign = u'\u2713' if text_pred == text_label else u'\u2718'
+                            logger.info("pred = %s, label = %s %s" % (id2label['text'][text_pred],
+                                                                      id2label['text'][text_label], sign))
+
+                    if (best_result is None) or (result[args.eval_metric] > best_result[args.eval_metric]):
+                        best_result = result
+                        save_model = True
+                        logger.info("!!! Best dev %s (lr=%s, epoch=%d): %.2f" %
+                                    (args.eval_metric, str(lr), epoch, result[args.eval_metric] * 100.0)
                         )
-                        model.train()
-                        result['global_step'] = global_step
-                        result['epoch'] = epoch
-                        result['learning_rate'] = lr
-                        result['batch_size'] = args.train_batch_size
-                        if not args.only_task_2:
-                            logger.info("First 20 predictions:")
-                            for text_pred, text_label in zip(
-                                    preds['text'][:20],
-                                    eval_text_labels_ids.numpy()[:20]):
-                                sign = u'\u2713' if text_pred == text_label else u'\u2718'
-                                logger.info("pred = %s, label = %s %s" % (id2label['text'][text_pred],
-                                                                          id2label['text'][text_label], sign))
 
-                        if (best_result is None) or (result[args.eval_metric] > best_result[args.eval_metric]):
-                            best_result = result
-                            save_model = True
-                            logger.info("!!! Best dev %s (lr=%s, epoch=%d): %.2f" %
-                                        (args.eval_metric, str(lr), epoch, result[args.eval_metric] * 100.0)
-                            )
-
-                        if save_model:
-                            model_to_save = model.module if hasattr(model, 'module') else model
-                            output_model_file = os.path.join(args.output_dir, WEIGHTS_NAME)
-                            output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
-                            torch.save(model_to_save.state_dict(), output_model_file)
-                            model_to_save.config.to_json_file(output_config_file)
-                            tokenizer.save_vocabulary(args.output_dir)
-                            if best_result:
-                                output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
-                                with open(output_eval_file, "w") as writer:
-                                    for key in sorted(result.keys()):
-                                        writer.write("%s = %s\n" % (key, str(result[key])))
+                    if save_model:
+                        model_to_save = model.module if hasattr(model, 'module') else model
+                        output_model_file = os.path.join(args.output_dir, WEIGHTS_NAME)
+                        output_config_file = os.path.join(args.output_dir, CONFIG_NAME)
+                        torch.save(model_to_save.state_dict(), output_model_file)
+                        model_to_save.config.to_json_file(output_config_file)
+                        tokenizer.save_vocabulary(args.output_dir)
+                        if best_result:
+                            output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
+                            with open(output_eval_file, "w") as writer:
+                                for key in sorted(result.keys()):
+                                    writer.write("%s = %s\n" % (key, str(result[key])))
     if args.do_eval:
         test_file = os.path.join(args.data_dir, 'test.json') if args.test_file == '' else args.test_file
         eval_examples = processor.get_test_examples(test_file)
 
-        eval_features = convert_examples_to_features(
+        eval_features = model.convert_examples_to_features(
             eval_examples, label2id, args.max_seq_length, tokenizer, logger
         )
         logger.info("***** Test *****")
@@ -411,14 +419,6 @@ def main(args):
 
         eval_dataloader, eval_text_labels_ids, eval_sequence_labels_ids = \
             get_dataloader_and_text_ids_with_sequence_ids(eval_features, args.eval_batch_size)
-
-        model = models[args.model].from_pretrained(
-            args.output_dir, num_sequence_labels=num_sequence_labels,
-            num_text_labels=num_text_labels,
-            text_clf_weight=args.text_clf_weight,
-            sequence_clf_weight=args.sequence_clf_weight,
-        )
-        model.to(device)
 
         preds, result, scores = evaluate(
             model, device, eval_dataloader, eval_text_labels_ids,
