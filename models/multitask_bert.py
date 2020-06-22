@@ -3,6 +3,7 @@ from transformers.tokenization_bert import BertTokenizer
 from torch import nn
 from torch.nn import CrossEntropyLoss
 import torch
+from itertools import groupby
 
 
 class InputFeatures(object):
@@ -227,7 +228,7 @@ class BertForFakeMultitaskLearning(BertPreTrainedModel):
         self.sequence_classifier = nn.Linear(config.hidden_size, self.num_sequence_labels)
         self.text_classifier = nn.Linear(config.hidden_size, self.num_text_labels)
 
-        assert pooling_type in ['first', 'avg']
+        assert pooling_type in ['first', 'avg', 'mid', 'last']
         self.pooling_type = pooling_type
 
         print(self.num_text_labels, self.num_sequence_labels)
@@ -302,6 +303,7 @@ class BertForFakeMultitaskLearning(BertPreTrainedModel):
                 for j in range(max_len):
                     tok_pos = token_pos_ids[i][j].item()
                     if tok_pos < 0:
+                        valid_sequence_output[i][prev_pos] /= token_len
                         break
                     if tok_pos != prev_pos:
                         valid_sequence_output[i][prev_pos] /= token_len
@@ -311,6 +313,31 @@ class BertForFakeMultitaskLearning(BertPreTrainedModel):
                     else:
                         valid_sequence_output[i][prev_pos] += sequence_output[i][j]
                         token_len += 1
+
+        elif self.pooling_type == 'last':
+            for i in range(batch_size):
+                prev_pos = 0
+                for j in range(max_len + 1):
+                    tok_pos = token_pos_ids[i][j].item() if j < max_len else -1
+                    if tok_pos != prev_pos:
+                        valid_sequence_output[i][prev_pos] = sequence_output[i][j - 1]
+                        prev_pos = tok_pos
+                    if tok_pos < 0:
+                        break
+
+        elif self.pooling_type == 'mid':
+            for i in range(batch_size):
+                token_positions = [token_pos_ids[i][j].item() for j in range(max_len)]
+                positions = []
+                for tok_pos, chunk in groupby(token_positions):
+                    if tok_pos < 0:
+                        break
+                    chunk = list(chunk)
+                    mid_pos = len(chunk) // 2 + len(positions)
+                    if len(chunk) % 2 == 0:
+                        mid_pos -= 1
+                    positions.extend(chunk)
+                    valid_sequence_output[i][tok_pos] = sequence_output[i][mid_pos]
 
         else:
             raise ValueError
