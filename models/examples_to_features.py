@@ -131,9 +131,12 @@ def get_dataloader_and_text_ids_with_sequence_ids(
         [f.sequence_ids for f in features], dtype=torch.long
     )
 
+    token_pos_ids = torch.tensor(
+        [f.token_pos_ids for f in features], dtype=torch.long
+    )
     eval_data = TensorDataset(
         input_ids, input_mask, segment_ids,
-        text_labels_ids, sequence_labels_ids
+        text_labels_ids, sequence_labels_ids, token_pos_ids
     )
 
     dataloader = DataLoader(eval_data, batch_size=batch_size)

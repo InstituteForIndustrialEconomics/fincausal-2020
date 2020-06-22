@@ -13,14 +13,14 @@ do
     do
       for wd in 0.1;
       do
-        for drop in 0.3 0.5
+        for drop in 0.1 0.2
         do
           CUDA_VISIBLE_DEVICES="$1" python run_fincausal.py \
             --model "bert-large-uncased" \
             --data_dir "data" \
             --do_train \
             --do_validate \
-            --output_dir "tmp_bert_models/best_sequence_16_per_epoch/lr-$lr.text_weight-$text_weight-seq_weight-$seq_weight.wd-$wd.drop-$drop.tag_fmt-$tag_fmt" \
+            --output_dir "tmp_2_bert_models/best_sequence_16_per_epoch/lr-$lr.text_weight-$text_weight-seq_weight-$seq_weight.wd-$wd.drop-$drop.tag_fmt-$tag_fmt" \
             --max_seq_length "$max_seq_length" \
             --train_batch_size "$train_batch_size" \
             --gradient_accumulation_steps "$gradient_accumulation_steps" \
@@ -33,7 +33,7 @@ do
             --learning_rate $lr \
             --tag_format "$tag_fmt" \
             --eval_metric "sequence_weighted avg_f1-score" \
-            --only_task_2;
+            --only_bert_ner;
           done
         done
     done

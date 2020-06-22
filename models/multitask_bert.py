@@ -30,7 +30,8 @@ class BertForMultitaskLearning(BertPreTrainedModel):
             num_text_labels: int = 2,
             text_clf_weight: float = 1.0,
             sequence_clf_weight: float = 1.0,
-            padding_index: int = 0
+            padding_index: int = 0,
+            pooling_type: str = ""
         ):
         super().__init__(config)
         self.text_clf_weight = text_clf_weight
@@ -227,6 +228,7 @@ class BertForFakeMultitaskLearning(BertPreTrainedModel):
         self.text_classifier = nn.Linear(config.hidden_size, self.num_text_labels)
 
         assert pooling_type in ['first', 'avg']
+        self.pooling_type = pooling_type
 
         print(self.num_text_labels, self.num_sequence_labels)
 
@@ -293,7 +295,7 @@ class BertForFakeMultitaskLearning(BertPreTrainedModel):
                         valid_sequence_output[i][tok_pos] = sequence_output[i][j]
                         prev_pos = tok_pos
 
-        elif self.poling_type == 'avg':
+        elif self.pooling_type == 'avg':
             for i in range(batch_size):
                 prev_pos = 0
                 token_len = 0

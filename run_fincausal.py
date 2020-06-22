@@ -91,7 +91,7 @@ def evaluate(
         ):
         batch = tuple([elem.to(device) for elem in batch])
         input_ids, input_mask, segment_ids, \
-            text_labels_ids, sequence_labels_ids = batch
+            text_labels_ids, sequence_labels_ids, token_pos_ids = batch
 
         with torch.no_grad():
             output = model(
@@ -99,7 +99,8 @@ def evaluate(
                 token_type_ids=segment_ids,
                 attention_mask=input_mask,
                 text_labels=None,
-                sequence_labels=None
+                sequence_labels=None,
+                token_pos_ids=token_pos_ids
             )
 
         sequence_logits, text_logits = output[:2]
@@ -190,12 +191,17 @@ def main(args):
     logger.info(args)
     logger.info("device: {}, n_gpu: {}".format(device, n_gpu))
 
-    processor = DataProcessor(tag_format=args.tag_format, filter_non_causal=args.only_task_2)
-    if args.only_task_2:
+    processor = DataProcessor(tag_format=args.tag_format, filter_non_causal=args.only_task_2 or args.only_bert_ner)
+
+    if args.only_task_2 or args.only_bert_ner:
+        model_name = f'{args.model}-fake'
         assert args.text_clf_weight == 0.0, f"Training only on task 2 requires to set " \
                                             f"text_clf_weight to zero. {args.text_clf_weight} passed."
         assert args.eval_metric.startswith('sequence'), f"Training only on task 2 requires to set task 2 related " \
                                                         f"metric. {args.eval_metric} passed."
+    else:
+        model_name = args.model
+
     text_labels_list = processor.get_text_labels(args.data_dir, logger)
     sequence_labels_list = processor.get_sequence_labels(args.data_dir, logger)
 
@@ -230,22 +236,24 @@ def main(args):
             args.model,
             hidden_dropout_prob=args.dropout
         )
-        model = models[args.model].from_pretrained(
+        model = models[model_name].from_pretrained(
             args.model, cache_dir=str(PYTORCH_PRETRAINED_BERT_CACHE),
             num_text_labels=num_text_labels,
             num_sequence_labels=num_sequence_labels,
             sequence_clf_weight=args.sequence_clf_weight,
             text_clf_weight=args.text_clf_weight,
+            pooling_type=args.bert_ner_pool_type,
             config=config
         )
         print("text and sequence tasks weights:", model.text_clf_weight, model.sequence_clf_weight)
 
     else:
-        model = models[args.model].from_pretrained(
+        model = models[model_name].from_pretrained(
             args.output_dir, num_sequence_labels=num_sequence_labels,
             num_text_labels=num_text_labels,
             text_clf_weight=args.text_clf_weight,
             sequence_clf_weight=args.sequence_clf_weight,
+            pooling_type=args.bert_ner_pool_type
         )
 
     model.to(device)
@@ -288,7 +296,6 @@ def main(args):
         best_result = None
         eval_step = max(1, len(train_batches) // args.eval_per_epoch)
         lr = float(args.learning_rate)
-
 
         if n_gpu > 1:
             model = torch.nn.DataParallel(model)
@@ -335,10 +342,10 @@ def main(args):
 
             for step, batch in enumerate(tqdm(train_batches, total=len(train_batches), desc='fitting ... ')):
                 batch = tuple(t.to(device) for t in batch)
-                input_ids, input_mask, segment_ids, text_labels_ids, sequence_labels_ids = batch
+                input_ids, input_mask, segment_ids, text_labels_ids, sequence_labels_ids, token_pos_ids = batch
                 loss = model(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask,
                              text_labels=text_labels_ids,
-                             sequence_labels=sequence_labels_ids)
+                             sequence_labels=sequence_labels_ids, token_pos_ids=token_pos_ids)
 
                 if n_gpu > 1:
                     loss = loss.mean()
@@ -378,7 +385,7 @@ def main(args):
                     result['epoch'] = epoch
                     result['learning_rate'] = lr
                     result['batch_size'] = args.train_batch_size
-                    if not args.only_task_2:
+                    if not args.only_task_2 and not args.only_bert_ner:
                         logger.info("First 20 predictions:")
                         for text_pred, text_label in zip(
                                 preds['text'][:20],
@@ -548,5 +555,9 @@ if __name__ == "__main__":
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
     parser.add_argument("--only_task_2", action="store_true",
                         help="whether to train only task 2 without multi-task learning")
+    parser.add_argument("--only_bert_ner", action="store_true",
+                        help="whether to train only task 2 with bert-ner")
+    parser.add_argument("--bert_ner_pool_type", type=str, default="first",
+                        help="pooling mode in bert-ner, one of avg or first")
     arguments = parser.parse_args()
     main(arguments)
