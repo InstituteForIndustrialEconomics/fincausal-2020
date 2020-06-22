@@ -12,7 +12,7 @@ import torch
 from scipy.special import softmax
 
 from torch.nn import CrossEntropyLoss
-from transformers.optimization import AdamW, get_linear_schedule_with_warmup
+from transformers.optimization import AdamW, get_linear_schedule_with_warmup, get_constant_schedule_with_warmup
 from transformers.file_utils import PYTORCH_PRETRAINED_BERT_CACHE, WEIGHTS_NAME, CONFIG_NAME
 
 from tqdm import tqdm
@@ -323,11 +323,18 @@ def main(args):
             optimizer_grouped_parameters,
             lr=lr
         )
-        scheduler = get_linear_schedule_with_warmup(
-            optimizer,
-            num_warmup_steps=warmup_steps,
-            num_training_steps=num_train_optimization_steps
-        )
+        if args.lr_schedule == 'constant_warmup':
+            print('lr schedule = constant_warmup')
+            scheduler = get_constant_schedule_with_warmup(
+                optimizer,
+                num_warmup_steps=warmup_steps
+            )
+        else:
+            scheduler = get_linear_schedule_with_warmup(
+                optimizer,
+                num_warmup_steps=warmup_steps,
+                num_training_steps=num_train_optimization_steps
+            )
 
         start_time = time.time()
         global_step = 0
@@ -559,5 +566,7 @@ if __name__ == "__main__":
                         help="whether to train only task 2 with bert-ner")
     parser.add_argument("--bert_ner_pool_type", type=str, default="first",
                         help="pooling mode in bert-ner, one of avg or first")
+    parser.add_argument("--lr_schedule", type=str, default="constant_warmup",
+                        help="lr adjustment schedule")
     arguments = parser.parse_args()
     main(arguments)
