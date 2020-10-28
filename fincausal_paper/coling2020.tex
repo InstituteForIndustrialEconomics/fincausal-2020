@@ -1,0 +1,213 @@
+%
+% File coling2020.tex
+%
+% Contact: feiliu@cs.ucf.edu & liang.huang.sh@gmail.com
+%% Based on the style files for COLING-2018, which were, in turn,
+%% Based on the style files for COLING-2016, which were, in turn,
+%% Based on the style files for COLING-2014, which were, in turn,
+%% Based on the style files for ACL-2014, which were, in turn,
+%% Based on the style files for ACL-2013, which were, in turn,
+%% Based on the style files for ACL-2012, which were, in turn,
+%% based on the style files for ACL-2011, which were, in turn, 
+%% based on the style files for ACL-2010, which were, in turn, 
+%% based on the style files for ACL-IJCNLP-2009, which were, in turn,
+%% based on the style files for EACL-2009 and IJCNLP-2008...
+
+%% Based on the style files for EACL 2006 by 
+%%e.agirre@ehu.es or Sergi.Balari@uab.es
+%% and that of ACL 08 by Joakim Nivre and Noah Smith
+
+\documentclass[11pt]{article}
+\usepackage{coling2020}
+\usepackage{times}
+\usepackage{url}
+\usepackage{latexsym}
+%\colingfinaltrue
+\setlength\titlebox{6cm}
+\colingfinalcopy % Uncomment this line for the final submission
+
+% You can expand the titlebox if you need extra space
+% to show all the authors. Please do not make the titlebox
+% smaller than 5cm (the original size); we will check this
+% in the camera-ready version and ask you to change it back.
+
+
+\title{LIORI at FinCausal 2020, Tasks 1 \& 2}
+
+\author{Adis Davletov \\
+	RANEPA \\
+	Lomonosov Moscow State University \\
+	{\tt davletov-aa@ranepa.ru} \\\And
+	Denis Gordeev \\
+	RANEPA \\
+	{\tt gordeev-di@ranepa.ru} \\\AND
+	Alexey Rey \\
+	RANEPA \\
+	{\tt {rey-ai}@ranepa.ru}\\\And
+	Nikolay Arefyev \\
+	Lomonosov Moscow State University,\\
+	Samsung R\&D Institute Russia,\\
+	National Research University \\ Higher School of Economics \\ \
+	\tt{nick.arefyev@gmail.com} \\
+}
+
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+In this paper, we describe the results of team LIORI at the FinCausal 2020 Shared task held as a part of the 1st Joint Workshop on Financial Narrative Processing and MultiLingual Financial Summarisation. The shared task consisted of two subtasks: 1) classifying whether a sentence contains any causality and 2) labelling phrases that indicate causes and consequences. We used Transformer-based models with joint-task learning and their voting ensembles. Our team ranked 1st in the first subtask and 4th in the second one.
+\end{abstract}
+
+%
+% The following footnote without marker is needed for the camera-ready
+% version of the paper.
+% Comment out the instructions (first text) and uncomment the 8 lines
+% under "final paper" for your variant of English.
+% 
+\blfootnote{
+	%
+	% for review submission
+	%
+	%\hspace{-0.65cm}  % space normally used by the marker
+	%Place licence statement here for the camera-ready version. See
+	%Section~\ref{licence} of the instructions for preparing a
+	%manuscript.
+	%
+	 % final paper: en-uk version 
+	
+	 \hspace{-0.45cm}  % space normally used by the marker
+	 This work is licensed under a Creative Commons 
+	 Attribution 4.0 International Licence.
+	 Licence details:
+	 \url{http://creativecommons.org/licenses/by/4.0/}.
+	 
+	% % final paper: en-us version 
+	%
+	% \hspace{-0.65cm}  % space normally used by the marker
+	% This work is licensed under a Creative Commons 
+	% Attribution 4.0 International License.
+	% License details:
+	% \url{http://creativecommons.org/licenses/by/4.0/}.
+}
+
+\section{Introduction}
+\label{intro}
+
+The Financial Document Causality Detection Task was devoted to finding causes and consequences in financial news \cite{Mariko-fincausal-2020}. This task is relevant for information retrieval and economics. This task was focused on causality associated with a financial event while an event was "defined as the arising or emergence of a new object or context in regard to a previous situation".
+
+The shared task consisted of two subtasks: 
+\begin{itemize}
+	\item Sentence Classification
+	
+	It was a binary classification task. The goal of this subtask was to detect whether a sentence displayed any causal meanings or not
+	
+	\item Cause and Effect Detection
+	
+	This task was a relation detection task. Participants needed to identify "in a causal sentence or text block the causal elements and the consequential ones" \footnote{http://wp.lancs.ac.uk/cfie/fincausal2020/}. This task could be considered as a sequence labelling problem because individual words and phrases corresponded to three labels: cause, consequence, empty label. Each word or character corresponded to only one label.
+\end{itemize}
+For both tasks simultaneously we used a single Transformer-based model \cite{attention} with two inputs and outputs for each of the tasks respectively. The first task was treated as a classification task with a single label for the input, while for the second the label was predicted for each input word. The training and dataset processing code is published on our GitHub page \footnote{https://github.com/InstituteForIndustrialEconomics/fincausal-2020}.
+
+Our team ranked 1st in the first subtask and 4th in the second one.
+\section{Related Work}
+There are many works devoted to sequence labelling in various domains as it is one of the most popular tasks in Natural Language Processing (NLP).
+
+Causality detection in texts is also a very old topic.
+First works date back the 80s according to the report by Asghar \cite{asghar2016automatic}.
+%There is also a great number of papers devoted to causality within the framework of traditional linguistics \cite{khoo}.
+Recently there have appeared works that leverage neural networks against for causality labelling \cite{li2019causality}. The results of neural networks there seem to be in line with the performance for other sequence labelling tasks such as named entity recognition \cite{ghaddar2018robust} for Bi-LSTM models according to paperswithcode.com \footnote{https://paperswithcode.com/sota/named-entity-recognition-ner-on-ontonotes-v5}. For our work, we adopted a Transformer-based approach as it performs the best against current models for sequence labelling and relation extraction. For example, if we look again at named entity recognition (one of the most popular sequence labelling tasks) - at paperswithcode.com\footnote{https://paperswithcode.com/task/named-entity-recognition-ner}, we can see that the top 3 best performing use an attention-based model for Ontonotes v5 and CoNLL 2003. Some recent work have also shown that multi-task learning can produce better results if we have several targets for the same input due to eavesdropping and lower task-bias \cite{ruder2017overview}, thus discouraging model from over-fitting. Recent competitions, where multi-task models perform well, also prove this point \cite{dai2020kungfupanda,renersans,bertoftrades}.
+\section{{Dataset}}
+
+The task dataset has been extracted from different 2019 financial news provided by Qwam \footnote{http://www.qwamci.com/}, and additional SEC data from the Edgar Database. The corpus consists of HTML-pages of financial news from 2019. It also contains various financial and legal reports from the SEC Edgar Database ticker list, filtered on financial keywords.
+ 
+The texts have been normalized for the research task in the following way:
+	\begin{itemize}
+		\item First, the text was split into sentences.
+		\item Then, sentences containing causal elements were identified. \item The document text is then split into passages of consecutive sentences, keeping causally-related sentences in the same passage which are used for binary predictions in the first subtask.
+		\item Passages with positive classes are used as the dataset for the second subtask.
+		\item The organizers provide the start and end indices for causes and effects.
+		
+	\end{itemize}
+
+The dataset was split into trial, train and test datasets by the organizers. The trial and train parts contained training labels, while the test part did not include them and was used for ranking. We combined the trial and train parts and used 20\% of the combined dataset for validation.
+
+
+\section{Solution}
+In this work, we went with multitask Transformer-based models for both subtasks. It means that we had two inputs and outputs, for each of the tasks respectively. In this work we tried BERT \cite{bert} and ROBERTa \cite{roberta} based models. BERT is a multilingual language model based on self-attention. ROBERTa is a "robustly optimized" BERT variant with larger mini-batches and byte-level BPE (byte-pair encodings). In both cases we used English large model variants (bert-large and roberta-large). On top of pre-trained BERT and ROBERTa models, we added two Linear layers with dropout for each of the tasks. Cross-entropy was used for training the models. Thus, we had for each layer we had a loss function that were weighted and concatenated. All used models were provided by Hugging Face \cite{Wolf2019HuggingFacesTS}. Our complete loss function can be seen below, where ${L}_{a}$ is the first subtask loss and ${L}_b$ is the second subtask loss.
+$${L}_a = -\frac{1}{m}\sum_{j=1}^{m}\sum_{i=1}^{N_c}y_i \cdot log(\hat{y_i}) $$
+where $m$ is the number of samples in the batch, $y_i$ is the target value,
+$\hat{y_i}$ -- our predicted value and $N_c$ is the number of classes.
+$${L}_b = -\frac{1}{m}\sum^{m}_{i=1}\frac{1}{N_j}\sum^{N_j}_{j=1}\sum_{c=1}^{N_c}y_c \cdot log(\hat{y_c}) $$
+where $m$ is the number of samples in the batch, $N_j$ is the number of tokens in the batch, $N_c$ is the number of NER classes, $\hat{y_c}$ -- the predicted NER class and $y_c$ is the target value.
+$$\mathcal{L} = \lambda_a{L}_a + \lambda_b{L}_b \textrm{, where $\lambda$ are scalar weights for the loss functions}$$
+
+All padded words and words non-labeled words (and their resulting tokens) were excluded from loss function calculation and not included into $N_j$, while special `[SEP]` and `[CLS]` tokens are included.
+
+
+While training models for the first subtask we tested a number of weighting schemes ranging between 2 and 0 for sequence labelling subtask loss. However, for the second subtask, the weights for text classification loss were set to zero which makes the model equivalent to a general sequence labelling model. We also tried various sequence labelling formats of the second subtask input: BIO (beginning, inside, outside) and BIEO (beginning, inside, end, outside). Learning rates in the range between $5e-06$ and $5e-05$ were tested. Dropout coefficients were tested from 0.1 to 0.2. For the first, subtask there were also provided the results for ensembles of the best 3, 4 and 5 performing models according to the validation dataset. Simple voting ensembles were used.
+
+We used a system with 2 NVidia RTX2080 GPUs and Google Colab to train all models.
+
+\section{Results}
+
+\begin{table}[h]
+	\centering
+	\begin{tabular}{|p{1.4cm}|p{1.4cm}|p{1.8cm}|p{1.2cm}|p{1.3cm}|p{1.5cm}|p{2.0cm}|p{1.1cm}|}
+		\hline
+		Test Score & Validation Score & Model & Target Format & Learning Rate & Text Loss Weight & Sequence Loss Weight & Dropout Rate \\ 	\hline
+		0.96529 & 0.960016 & bert & bieo & 1e-05 & 1.0 & 0.2 & 0.1\\ \hline 0.965454 & 0.960291 & bert & se & 7e-06 & 1.0 & 0.1 & 0.1\\ \hline
+		0.96685 & 0.961945 & bert & se & 5e-05 & 1.0 & 0.2 & 0.15\\ \hline\hline
+		...&...&...&...&...&...&...&... \\ \hline
+		0.973839 & 0.961179 & roberta & bio & 1e-05 & 1.0 & 0.1 & 0.1\\ \hline
+		0.973839 & 0.967221 & roberta & bio & 1e-05 & 1.0 & 0.1 & 0.1\\ \hline
+		\textit{0.975088} & \textit{0.9657} & \textit{roberta} & \textit{bio} & \textit{5e-06} & \textit{1.0} & \textit{0.1} & \textit{0.1}\\ \hline\hline
+		0.975238 & & top-3 Ensemble &&&&&\\ \hline
+		0.975735 & & top-4 Ensemble &&&&&\\ \hline
+		\textbf{0.977467} & & \textbf{top-5 Ensemble} &&&&&\\ \hline
+		
+	\end{tabular}
+	\label{tab:subtask1}
+	\caption{Model results for Subtask 1: Sentence Classification. In the Table we provide the results for only the best and the worst 3 models and of the ensembles of the top-N performing models. The results are sorted from the bottom to the top.}
+\end{table}
+
+For the first subtask, the organizers used F1-score. For the second subtask, the metric is a weighted average F1 score, where the F1 score of each class is balanced by the number of items in each class (see {\cite{Mariko-fincausal-2020}).
+
+In the first subtask the difference between our solution and the next participant was less than 0.002 F1 points. For the second subtask the leading solution outperformed us by 0.12 F1 points. The results of individual models and their hyperparameters can be seen in Tables 1 and 2 for each of the subtasks respectively.
+
+
+As can be seen from Table 1 for subtask 1 ROBERTa robustly outperforms BERT for the first subtask. The best top-3 single models are ROBERTa-based with various hyperparameters. It can also be seen that sequence loss improves model results, but the best models have their weights scaled down by 0.1. It also should be noted that the difference between all individual models is small and the difference between the best and the worst-performing ones is less than 0.1 F-1-score point. For the first subtask, we also tried an ensemble of 3,4 and 5 best performing individual models. The increase in the number of the used best models consistently improved the results. Thus, it may be also beneficial to train other types of models or to increase the number of models in an ensemble.
+
+Paradoxically, for the second subtask BERT-based models consistently outperform ROBERTa based ones. Moreover, the difference is much larger and constitutes more than 0.7 F1-score points. We did not try ensemble-based models for the second subtask. It also can be seen that all our models tend to overfit to the training and validation datasets. A more robust training scheme such as k-fold cross validation might be of benefit here.
+
+\begin{table}
+	\centering
+	\begin{tabular}{|p{1.5cm}|p{1.5cm}|p{1.5cm}|p{1.5cm}|p{1.5cm}|p{1.5cm}|p{1.5cm}|p{1.5cm}|}
+		\hline
+		Test Score & Validation Score & Model & Target Format & Learning Rate & Text Loss Weight & Sequence Loss Weight & Dropout Rate \\ 	\hline
+		0.754986 & 0.872582 & roberta & bio & 0.0001 & 0.0 & 1.0 & 0.1\\ \hline 0.76584 & 0.82897 & roberta & bio & 0.0001 & 0.0 & 1.0 & 0.2\\ \hline  0.794089 & 0.865707 & roberta & bio & 9e-05 & 0.0 & 1.0 & 0.2\\ \hline\hline
+		...&...&...&...&...&...&...&... \\ \hline
+		0.823952 & 0.898873 & bert & bio & 0.0001 & 0.0 & 1.0 & 0.2\\ \hline
+		0.824818 & 0.894067 & bert & bio & 7e-05 & 0.0 & 1.0 & 0.2\\ \hline
+		\textbf{0.826049} & \textbf{0.906328} & \textbf{bert} & \textbf{bio} & \textbf{0.0001} & \textbf{0.0} & \textbf{1.0} & \textbf{0.1}\\\hline\hline
+		
+	\end{tabular}
+	\label{tab:subtask2}
+	\caption{Model results for Subtask 2: Cause and Effect Detection.  In the Table, there are provided the results for only the best and the worst 3 models. The results are sorted from the bottom to the top.}
+\end{table}
+\section{Conclusion}
+This paper describes the results of team LIORI at the FinCausal 2020 Shared task held as a part of the 1st Joint Workshop on Financial Narrative Processing and MultiLingual Financial Summarisation. The shared task consisted of two subtasks: classifying whether a sentence contains any causality and labelling phrases which indicate causes and consequences. Transformer-based models with joint-task learning were used. In this paper we show that different model architectures perform better for different subtasks and that joint-task learning might improve results for some subtasks. However, it also results in slight overfitting for sequence labelling task and might require further investigation. However, due to the rather low gap between our and the winning solutions, it still has shown an adequate approach to multi-task labelling tasks.
+
+\section*{Acknowledgements}
+We thank the organisers of the competition for such an inspiring task. We are grateful to our reviewers for their useful suggestions. The contribution of Nikolay Arefyev to the paper was partially done within the framework of the HSE University Basic Research Program funded by the Russian Academic Excellence Project '5-100'.
+
+%\section*{Acknowledgements}
+%The acknowledgements should go immediately before the references.  Do
+%not number the acknowledgements section. Do not include this section
+%when submitting your paper for review.
+
+% include your own bib file like this:
+\bibliographystyle{coling}
+\bibliography{coling2020}
+
+\end{document}
